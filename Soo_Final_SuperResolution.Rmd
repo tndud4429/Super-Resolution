@@ -1,0 +1,585 @@
+---
+title: "Soo_Final_SuperResolution"
+author: "Soo"
+date: "7/6/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Setup
+
+First include the relevant libraries.
+
+```{r,warning=FALSE}
+library(pixmap)
+library(caret)
+library(e1071)
+```
+
+# Picture Extraction
+
+Use basic regular expressions to extract only the pictures.
+
+```{r,warning=FALSE}
+
+setwd("/Users/LenaShin/Desktop/Summer2019/SML")
+
+# Get directory structure
+dir_list = dir(path="CroppedYale/",all.files=FALSE,recursive=TRUE)
+
+# Update directory char vector by removing cases
+dir_list_new <- dir_list[-grep("WS_FTP|Ambient|info|DEADJOE|bad",x=dir_list)]
+```
+
+Using character string **dir_list_new**, create a function that extracts all the face pictures of a person, vectorizes it, and outputs a matix with the features in the columns and samples in the rows.
+
+```{r,warning=FALSE}
+
+pictures <- function(folder_name,string,dir_list,n.col=1){
+
+  index <- grep(string,x=dir_list)
+  face_matrix <- matrix(nrow=length(index),ncol=n.col)
+  for(i in 1:length(dir_list[index])){
+
+    face <- read.pnm(file = paste(folder_name,x=dir_list[index][i],sep=""))
+    face_matrix[i,] <- c(getChannels(face))
+    }
+  
+  return(face_matrix)
+}
+
+```
+
+Likewise, create a function that extracts n.pic number of sample pictures of a person and outputs a matrix of the pictures.
+
+```{r,warning=FALSE}
+
+sample_pictures <- function(folder_name,string,dir_list,n.col=1,n.pic=1){
+
+  index <- grep(string,x=dir_list)
+  face_matrix <- matrix(nrow=n.pic,ncol=n.col)
+  random_index <- sample(index,size=n.pic,replace=FALSE)
+  for(i in 1:n.pic){
+    face <- read.pnm(file = paste(folder_name,x=dir_list[random_index][i],sep=""))
+    face_matrix[i,] <- c(getChannels(face))
+    }
+  return(face_matrix)
+}
+
+```
+
+# Downsampling
+
+Now, write a function to throw away information on every even row and column to create a 1/2 size image.
+
+```{r,warning=FALSE}
+
+downsampling <- function(mat){
+  n.row <- dim(mat)[1]
+  n.col <- dim(mat)[2]
+  new_row <- seq(from=1, to=n.row, by=2)
+  new_col <- seq(from=1, to=n.col, by=2)
+  new_mat <- matrix(nrow=ceiling(n.row/2),ncol=ceiling(n.col/2))
+  new_mat <- mat[new_row,new_col]
+  return(new_mat)
+}
+
+```
+
+Let's test the function.
+
+```{r,warning=FALSE}
+
+setwd("/Users/LenaShin/Desktop/Summer2019/SML/")
+
+person_1 <- pictures("CroppedYale/","yaleB01",dir_list_new,n.col=32256)
+
+#Let's downsample the first picture of the first person
+original_picture <- matrix(person_1[1,],nrow=192,ncol=168)
+down_sampled_picture <-downsampling(matrix(person_1[1,],nrow=192,ncol=168))
+twice_DS_picture <- downsampling(down_sampled_picture)
+
+#And compare them. Just to make sure if the downsampling function is working, I'll downsample one more time for comparison
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=original_picture))
+title("Original picture")
+plot(pixmapGrey(data=down_sampled_picture))
+title("Downsampled picture")
+plot(pixmapGrey(data=twice_DS_picture))
+title("Twice downsampled picture")
+
+#Check the dimensions of the pictures.
+dim(original_picture)
+dim(down_sampled_picture)
+dim(twice_DS_picture)
+
+```
+
+
+To make the downsampled picture in a higher resolution, I'll then write a function to add back a row between each row and a column between each column so that the index of empty pixels are even numbers. So the dimension of the resulting picture will be (2*rows) by (2*columns).
+
+```{r,warning=FALSE}
+
+add_white_pixels <- function(mat){
+  
+  n.row <- dim(mat)[1]
+  n.col <- dim(mat)[2]
+  new_row <- (n.row)*2
+  new_col <- (n.col)*2
+  new_mat <- matrix(1,nrow=new_row,ncol=new_col)
+  
+  for(i in 0:(n.row-1)){
+    
+    for(j in 0:(n.col-1)){
+      
+      new_mat[(2*i+1),(2*j+1)] <- mat[(i+1),(j+1)]
+      
+    }
+  }
+  return(new_mat)
+}
+
+```
+
+Test the function.
+
+```{r,warning=FALSE}
+
+a <- add_white_pixels(down_sampled_picture)
+b <- add_white_pixels(twice_DS_picture)
+plot(pixmapGrey(data=a))
+plot(pixmapGrey(data=b))
+dim(a)
+dim(b)
+
+```
+
+I will write a function that double-sizes and fills the blank pixels by replication.
+
+```{r,warning=FALSE}
+
+doubleSized_with_replication <- function(mat){
+  
+  new_mat <- add_white_pixels(mat)
+  n.row <- dim(new_mat)[1]
+  n.col <- dim(new_mat)[2]
+
+  for(i in 0:((n.row/2)-1)){
+    
+    for(j in 0:((n.col/2)-1)){
+      
+      #The code below will copy the previous row and column of the original picture so that the result picture will look the same as before up-sizing, but the size is doubled.
+      new_mat[(2*i+2),(2*j+1)] <- new_mat[2*i+1,2*j+1]
+      new_mat[(2*i+1),(2*j+2)] <- new_mat[2*i+1,2*j+1]
+      new_mat[(2*i+2),(2*j+2)] <- new_mat[2*i+1,2*j+1]
+      
+    }
+  }
+  return(new_mat)
+}
+
+```
+
+Test the function and compare it with the picture before downsampling. The images in the middle are the results from the function.
+
+```{r,warning=FALSE}
+
+a_replication <- doubleSized_with_replication(down_sampled_picture)
+b_replication <- doubleSized_with_replication(twice_DS_picture)
+
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=original_picture))
+title("Original picture")
+plot(pixmapGrey(data=a_replication))
+title("Downsampled picture double sized with replication")
+plot(pixmapGrey(data=down_sampled_picture))
+title("Downsampled picture")
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=down_sampled_picture))
+title("Downsampled picture")
+plot(pixmapGrey(data=b_replication))
+title("Twice downsampled picture double sized with replication")
+plot(pixmapGrey(data=twice_DS_picture))
+title("Twice downsampled picture")
+
+```
+
+
+Likewise, I'll write another function to fill the empty pixels with the mean value of the nearest known pixels and see what happens.
+ 
+```{r,warning=FALSE}
+
+doubleSized_with_mean <- function(mat){
+  
+  new_mat <- add_white_pixels(mat)
+  n.row <- dim(new_mat)[1]
+  n.col <- dim(new_mat)[2]
+  
+  #Note that the index for the empty rows and colums are even numbers.
+  #The code below put the means on even rows & odd columns and odd rows & even columns.
+  for(i in 0:(floor(n.row/2)-2)){
+    for(j in 0:(floor(n.col/2)-2)){
+      new_mat[2*i+1,2*j+2] <- mean(c(new_mat[2*i+1,2*j+1],new_mat[2*i+1,2*j+3]))
+      new_mat[2*i+2,2*j+1] <- mean(c(new_mat[2*i+1,2*j+1],new_mat[2*i+3,2*j+1]))
+    }
+    new_mat[2*i+2,n.col-1] <- mean(c(new_mat[2*i+1,n.col-1],new_mat[2*i+3,n.col-1]))
+  }
+  for(j in 0:floor(n.col/2)-2){
+    new_mat[n.row-1,2*j+2] <- mean(c(new_mat[n.row-1,2*j+1],new_mat[n.row-1,2*j+3]))
+  }
+  #The code below the the means on even rows & even columns
+  for(i in 1:(floor(n.row/2)-1)){
+    for(j in 1:(floor(n.col/2)-1)){
+      new_mat[2*i,2*j] <- mean(c(new_mat[2*i-1,2*j],new_mat[2*i,2*j-1],new_mat[2*i,2*j+1],new_mat[2*i+1,2*j]))
+    }
+  }
+  #Since there is not enough information for the last row and the last column, copy the previous pixel for the odd index, and get the mean of the odd index to store in the even index.
+  #The below code is for the odd index of the last row and the last column.
+  for(i in 0:(floor(n.row/2)-1)){
+    new_mat[2*i+1,n.col] <- new_mat[2*i+1,n.col-1]
+  }
+  for(j in 0:(floor(n.col/2)-1)){
+      new_mat[n.row,2*j+1] <- new_mat[n.row-1,2*j+1]
+    }
+  #The below code is for the even index of the last row and the last column.
+  for(i in 1:(floor(n.row/2)-1)){
+      new_mat[2*i,n.col] <- mean(c(new_mat[2*i-1,n.col],new_mat[2*i+1,n.col]))
+  }
+  for(j in 1:(floor(n.col/2)-1)){
+      new_mat[n.row,2*j] <- mean(c(new_mat[n.row,2*j-1],new_mat[n.row,2*j+1]))
+  }
+  new_mat[n.row,n.col] <- mean(c(new_mat[n.row-1,n.col],new_mat[n.row,n.col-1]))
+  return(new_mat)
+}
+
+```
+
+Test the function and compare it with the picture before downsampling. The images in the middle are the results from the function.
+
+```{r,warning=FALSE}
+
+a_mean <- doubleSized_with_mean(down_sampled_picture)
+b_mean <- doubleSized_with_mean(twice_DS_picture)
+
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=original_picture))
+title("Original picture")
+plot(pixmapGrey(data=a_mean))
+title("Downsampled picture double sized with mean")
+plot(pixmapGrey(data=down_sampled_picture))
+title("Downsampled picture")
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=down_sampled_picture))
+title("Downsampled picture")
+plot(pixmapGrey(data=b_mean))
+title("Twice downsampled picture double sized with mean")
+plot(pixmapGrey(data=twice_DS_picture))
+title("Twice downsampled picture")
+
+```
+
+With the empty pixels filled with mean values, it gives a blurred result compared to the original picture before downsampling. Since I only want to use original data, I'll use doubleSized_with_replication for my super resolution algorithm.
+ 
+Now, with the doubleSized_with_replication function, I'll use Kernel smoothing models that use the Nadaraya-Watson kernel regression to estimate the newly created pixels. The Kernel smoothing model is a proper model to use for super-resolution since it weighs the data by distances. We want to estimate a pixel by putting more weight on closer pixels and less weight on further pixels. The Kernel model is also a good fit because it corrects the biasness of boundary data when there is not enough information while the estimates from other non-linear are bised on the boundary.
+
+In the function in the below, I only want to estimate values with the original data rather than estimated values affecting the next estimation. So, in the function, I'll create a new matrix to store the values estimated from the original data rather than putting the estimated values right into the existing matrix.
+
+```{r,warning=FALSE}
+
+ksmooth_estimation <- function(mat,bandwidth=1.6){
+  
+  new_mat <- doubleSized_with_replication(mat)
+  n.row <- dim(new_mat)[1]
+  n.col <- dim(new_mat)[2]
+  x_vec <- vector(mode="numeric",length=9)
+  y_vec <- vector(mode="numeric",length=9)
+  
+  #This loop estimates the interior pixels using Kernel smoothing.
+  for(i in 1:(floor(n.row/2)-2)){
+    for (j in 1:(floor(n.col/2)-2)){
+      #This chunk of codes estimates the "left top" pixel of a 2 by 2 submatrix.
+      {
+      #I'll let each x that is being estimated be (row_index)+(col_index). The x_vec is the vector of the distance of each pixels around [x,y] that is the index of the targeted pixel.
+      i_ <- 2*i+1
+      j_ <- 2*j+1
+      x_vec <- c((i+j),(i+j+2),(i+j-1),(i+j-3),(i+j-2),(i+j+4),(i+j+2),(i+j+3),(i+j+1))
+      #This is the vector of the y values corresting to each x in x_vec.
+      y_vec <- c(mat[i+1,j+1],mat[i,j],mat[i,j+1],mat[i,j+2],mat[i+1,j+2],mat[i+2,j+2],mat[i+2,j+1],mat[i+2,j],mat[i+1,j])
+      k <- ksmooth(x=x_vec,y=y_vec,kernel = "normal",bandwidth=bandwidth,range.x =seq(from=1,to=10,by=0.0001),x.points=i+j)
+      x1 <- which(k$x==(i+j))
+      y1<- k$y[x1]
+      new_mat[i_,j_] <- y1
+      }
+      
+      #This chunk of codes estimates the "right top" pixel of a 2 by 2 submatrix.
+      {
+      i_ <- 2*i+1
+      j_ <- 2*j+2
+      x_vec <- c((i+j),(i+j+3),(i+j+1),(i+j+2),(i+j-1),(i+j-3),(i+j-2),(i+j+4),(i+j+2))
+      y_vec <- c(mat[i+1,j+1],mat[i,j],mat[i,j+1],mat[i,j+2],mat[i+1,j+2],mat[i+2,j+2],mat[i+2,j+1],mat[i+2,j],mat[i+1,j])
+      k <- ksmooth(x=x_vec,y=y_vec,kernel = "normal",bandwidth=bandwidth,range.x =seq(from=1,to=10,by=0.0001),x.points=i+j)
+      x2 <- which(k$x==(i+j))
+      y2<- k$y[x2]
+      new_mat[i_,j_] <- y2
+      }
+      
+      #This chunk of codes estimates the "left bottom" pixel of a 2 by 2 submatrix.
+      {
+      i_ <- 2*i+2
+      j_ <- 2*j+1
+      x_vec <- c((i+j),(i+j+3),(i+j+2),(i+j+4),(i+j+2),(i+j-3),(i+j-1),(i+j-2),(i+j+1))
+      y_vec <- c(mat[i+1,j+1],mat[i,j],mat[i,j+1],mat[i,j+2],mat[i+1,j+2],mat[i+2,j+2],mat[i+2,j+1],mat[i+2,j],mat[i+1,j])
+      k <- ksmooth(x=x_vec,y=y_vec,kernel = "normal",bandwidth=bandwidth,range.x =seq(from=1,to=10,by=0.0001),x.points=i+j)
+      x3 <- which(k$x==(i+j))
+      y3<- k$y[x3]
+      new_mat[i_,j_] <- y3
+      }
+      
+      #This chunk of codes estimates the "right bottom" pixel of a 2 by 2 submatrix.
+      {
+      i_ <- 2*i+2
+      j_ <- 2*j+2
+      x_vec <- c((i+j),(i+j+4),(i+j-2),(i+j-3),(i+j-1),(i+j+2),(i+j+1),(i+j+3),(i+j+2))
+      y_vec <- c(mat[i+1,j+1],mat[i,j],mat[i,j+1],mat[i,j+2],mat[i+1,j+2],mat[i+2,j+2],mat[i+2,j+1],mat[i+2,j],mat[i+1,j])
+      k <- ksmooth(x=x_vec,y=y_vec,kernel = "normal",bandwidth=bandwidth,range.x =seq(from=1,to=10,by=0.0001),x.points=i+j)
+      x4 <- which(k$x==(i+j))
+      y4 <- k$y[x4]
+      new_mat[i_,j_] <- y4
+      }
+      
+    }
+      
+  }
+  return(new_mat)
+}
+
+```
+
+```{r,warning=FALSE}
+
+superResolution <- function(picture,bandwidth=1.6,repetition=1){
+  
+  new_picture <- picture
+  for(i in 1:repetition){
+    new_picture <- ksmooth_estimation(new_picture,bandwidth)
+  }
+  return(new_picture)
+}
+
+```
+
+Check the super resolution result. When the bandwidth is wider (i.e. bandwidth=2), it gives a smoother result but is blurrier. When the bandwidth is smaller (i.e. bandwidth), there is not much difference with the downsampled picture. It seems like it gives a better result when the bandwidth is between 1.4 to 1.6 just by looking.
+
+```{r,warning=FALSE}
+
+a_superResolution <- superResolution(picture=down_sampled_picture, bandwidth=1.5)
+
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=original_picture))
+title("Original picture")
+plot(pixmapGrey(data=a_superResolution))
+title("Super resolution")
+
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=down_sampled_picture))
+title("Downsampled picture")
+plot(pixmapGrey(data=a_superResolution))
+title("Super resolution")
+
+```
+
+
+
+```{r,warning=FALSE}
+
+smoothingSpline_estimation <- function(mat){
+  
+  new_mat <- doubleSized_with_replication(mat)
+  n.row <- dim(new_mat)[1]
+  n.col <- dim(new_mat)[2]
+  x_vec <- vector(mode="numeric",length=9)
+  y_vec <- vector(mode="numeric",length=9)
+  
+  #This loop estimates the interior pixels using Kernel smoothing.
+  for(i in 1:(floor(n.row/2)-2)){
+    for (j in 1:(floor(n.col/2)-2)){
+      #This chunk of codes estimates the "left top" pixel of a 2 by 2 submatrix.
+      {
+      #I'll let each x that is being estimated be (row_index)+(col_index). The x_vec is the vector of the distance of each pixels around [x,y] that is the index of the targeted pixel.
+      i_ <- 2*i+1
+      j_ <- 2*j+1
+      x_vec <- c((i+j),(i+j+2),(i+j-1),(i+j-3),(i+j-2),(i+j+4),(i+j+2),(i+j+3),(i+j+1))
+      #This is the vector of the y values corresting to each x in x_vec.
+      y_vec <- c(mat[i+1,j+1],mat[i,j],mat[i,j+1],mat[i,j+2],mat[i+1,j+2],mat[i+2,j+2],mat[i+2,j+1],mat[i+2,j],mat[i+1,j])
+      k <- smooth.spline(x=x_vec,y=y_vec)
+      x1 <- which(k$x==(i+j))
+      y1<- k$y[x1]
+      new_mat[i_,j_] <- y1
+      }
+      
+      #This chunk of codes estimates the "right top" pixel of a 2 by 2 submatrix.
+      {
+      i_ <- 2*i+1
+      j_ <- 2*j+2
+      x_vec <- c((i+j),(i+j+3),(i+j+1),(i+j+2),(i+j-1),(i+j-3),(i+j-2),(i+j+4),(i+j+2))
+      y_vec <- c(mat[i+1,j+1],mat[i,j],mat[i,j+1],mat[i,j+2],mat[i+1,j+2],mat[i+2,j+2],mat[i+2,j+1],mat[i+2,j],mat[i+1,j])
+      k <- smooth.spline(x=x_vec,y=y_vec)
+      x2 <- which(k$x==(i+j))
+      y2<- k$y[x2]
+      new_mat[i_,j_] <- y2
+      }
+      
+      #This chunk of codes estimates the "left bottom" pixel of a 2 by 2 submatrix.
+      {
+      i_ <- 2*i+2
+      j_ <- 2*j+1
+      x_vec <- c((i+j),(i+j+3),(i+j+2),(i+j+4),(i+j+2),(i+j-3),(i+j-1),(i+j-2),(i+j+1))
+      y_vec <- c(mat[i+1,j+1],mat[i,j],mat[i,j+1],mat[i,j+2],mat[i+1,j+2],mat[i+2,j+2],mat[i+2,j+1],mat[i+2,j],mat[i+1,j])
+      k <- smooth.spline(x=x_vec,y=y_vec)
+      x3 <- which(k$x==(i+j))
+      y3<- k$y[x3]
+      new_mat[i_,j_] <- y3
+      }
+      
+      #This chunk of codes estimates the "right bottom" pixel of a 2 by 2 submatrix.
+      {
+      i_ <- 2*i+2
+      j_ <- 2*j+2
+      x_vec <- c((i+j),(i+j+4),(i+j-2),(i+j-3),(i+j-1),(i+j+2),(i+j+1),(i+j+3),(i+j+2))
+      y_vec <- c(mat[i+1,j+1],mat[i,j],mat[i,j+1],mat[i,j+2],mat[i+1,j+2],mat[i+2,j+2],mat[i+2,j+1],mat[i+2,j],mat[i+1,j])
+      k <- smooth.spline(x=x_vec,y=y_vec)
+      x4 <- which(k$x==(i+j))
+      y4 <- k$y[x4]
+      new_mat[i_,j_] <- y4
+      }
+      
+    }
+      
+  }
+  return(new_mat)
+}
+
+```
+
+
+```{r,warning=FALSE}
+
+superResolution2 <- function(picture,repetition=1){
+  
+  new_picture <- picture
+  for(i in 1:repetition){
+    new_picture <- smoothingSpline_estimation(new_picture)
+  }
+  return(new_picture)
+}
+
+```
+
+
+```{r,warning=FALSE}
+
+a_superResolution2 <- superResolution(picture=down_sampled_picture)
+#tail(a_superResolution)
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=original_picture))
+title("Original picture")
+plot(pixmapGrey(data=a_superResolution))
+title("Super resolution")
+plot(pixmapGrey(data=down_sampled_picture))
+title("Downsampled picture")
+
+```
+
+I'll calculate the best bandwidth parameter by getting the lowest distance from the original picture.
+
+```{r,warning=FALSE}
+
+#Find the bandwidth which gives the lowest difference.
+
+error <- vector(mode="numeric",length=100)
+x <- seq(from=1.9,to=2.0,by=0.004)
+picture <- matrix(0,nrow=nrow(original_picture),ncol=(original_picture))
+for(i in 1:25){
+  picture <- superResolution(picture=down_sampled_picture, bandwidth=x[i])
+  error[i] <- sqrt(sum((original_picture-picture)^2))
+}
+best_bandwidth <- x[which.min(error)]
+best_bandwidth
+
+#print out the result with the best bandwidth.
+
+a_superResolution <- superResolution(picture=down_sampled_picture, bandwidth=best_bandwidth)
+
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=original_picture))
+title("Original picture")
+plot(pixmapGrey(data=a_superResolution))
+title("Super resolution")
+
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=down_sampled_picture))
+title("Downsampled picture")
+plot(pixmapGrey(data=a_superResolution))
+title("Super resolution")
+
+
+```
+
+I also calculate the error of the kernel and the smoothing spline models. Also, calculate the difference between kernel smoothing and smoothing spline models. When the bandwidth for superResolution function with ksmooth estimation is 1.6, the result is exactly same as superResolution2 function with smoothing spline estimation.
+
+```{r,warning=FALSE}
+
+#error from kernel smoothing with the optimized parameter.
+
+a_superResolution <- superResolution(picture=down_sampled_picture, bandwidth=best_bandwidth)
+a_error_kernel <- sqrt(sum((original_picture-a_superResolution)^2))
+a_error_kernel
+
+#error from smoothing spline.
+
+a_error_spline <- sqrt(sum((original_picture-a_superResolution2)^2))
+a_error_spline
+
+#difference ditween the kernel model and the smoothing spline model.
+
+a_superResolution <- superResolution(picture=down_sampled_picture, bandwidth=1.6)
+a_error_ker_n_sm <- sqrt(sum((a_superResolution-a_superResolution2)^2))
+a_error_ker_n_sm
+
+```
+
+This algorithm also works with any other pictures.
+
+```{r,warning=FALSE}
+#Try on another picture
+setwd("/Users/LenaShin/Desktop/Summer2019/SML")
+person_2 <- pictures("CroppedYale/","yaleB02",dir_list_new,n.col=32256)
+
+#Let's downsample the first picture of the second person
+original_picture_2 <- matrix(person_2[1,],nrow=192,ncol=168)
+
+down_sampled_picture_2 <-downsampling(matrix(person_2[1,],nrow=192,ncol=168))
+
+
+a_superResolution_2 <- superResolution(picture=down_sampled_picture_2, bandwidth=best_bandwidth)
+
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=original_picture_2))
+title("Original picture")
+plot(pixmapGrey(data=a_superResolution_2))
+title("Super resolution")
+
+par(mfrow=c(1,3),mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=down_sampled_picture_2))
+title("Downsampled picture")
+plot(pixmapGrey(data=a_superResolution_2))
+title("Super resolution")
+
+```
+
+

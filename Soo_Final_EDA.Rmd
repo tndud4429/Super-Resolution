@@ -1,0 +1,225 @@
+---
+title: "SML_Final_project"
+author: "Soo"
+date: "6/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+
+First include the relevant libraries.
+
+```{r,warning=FALSE}
+library(pixmap)
+```
+
+# Picture Extraction
+
+Use basic regular expressions to extract only the pictures.
+
+```{r,warning=FALSE}
+
+setwd("/Users/LenaShin/Desktop/")
+
+# Get directory structure
+dir_list = dir(path="CroppedYale/",all.files=FALSE,recursive=TRUE)
+
+# Update directory char vector by removing cases
+dir_list_new <- dir_list[-grep("WS_FTP|Ambient|info|DEADJOE|bad",x=dir_list)]
+```
+
+Using character string **dir_list_new**, create a function that extracts all the face pictures of a person, vectorizes it, and outputs a matix with the features in the columns and samples in the rows.
+
+```{r,warning=FALSE}
+
+pictures <- function(folder_name,string,dir_list,n.col=1){
+
+  index <- grep(string,x=dir_list)
+  face_matrix <- matrix(nrow=length(index),ncol=n.col)
+  for(i in 1:length(dir_list[index])){
+
+    face <- read.pnm(file = paste(folder_name,x=dir_list[index][i],sep=""))
+    face_matrix[i,] <- c(getChannels(face))
+    }
+  
+  return(face_matrix)
+}
+
+```
+
+Likewise, create a function that extracts n.pic number of sample pictures of a person and outputs a matrix of the pictures.
+
+```{r,warning=FALSE}
+
+sample_pictures <- function(folder_name,string,dir_list,n.col=1,n.pic=1){
+
+  index <- grep(string,x=dir_list)
+  face_matrix <- matrix(nrow=n.pic,ncol=n.col)
+  random_index <- sample(index,size=n.pic,replace=FALSE)
+  for(i in 1:n.pic){
+    face <- read.pnm(file = paste(folder_name,x=dir_list[random_index][i],sep=""))
+    face_matrix[i,] <- c(getChannels(face))
+    }
+  return(face_matrix)
+}
+
+```
+
+# Exploratory Data Analysis
+
+Store all the pictures of the first person.
+
+```{r,warning=FALSE}
+
+setwd("/Users/LenaShin/Desktop/Summer2019/SML")
+person_1 <- pictures("CroppedYale/","yaleB01",dir_list_new,n.col=32256)
+
+# Print the first 3 pictures of the person
+par(mfrow=c(1,1), mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=c(person_1[1,],person_1[2,],person_1[3,]),nrow=192,ncol=168*3,cellres=1))
+
+```
+
+Get the mean face of the first person and plot it.
+
+```{r}
+par(mfrow=c(1,1),mai=c(1,1,1,1))
+mean_face_1<- apply(person_1, 2, mean)
+plot(pixmapGrey(data=mean_face_1,nrow=192,ncol=168,cellres=1))
+```
+
+Using the function, extract all the pictures of all the people. (It takes much time to contain all the pictures into a matrix. Might not want to do it..)
+
+```{r,warning=FALSE}
+
+# Get the list of the folder names of each peoson
+people_list <- vector(mode="character",length=39)
+for(i in 1:39){
+  ifelse(i<10, people_list[i] <- paste("yaleB0",i,sep=""), people_list[i] <- paste("yaleB",i,sep=""))
+}
+
+# Note that there is no folder named "yaleB14". So, remove it. Then, there are 38 people in total.
+people_list <- people_list[-14]
+
+
+# To create a matrix to contain all the pictures of all the people, run the code below
+
+#setwd("/Users/LenaShin/Desktop/")
+#people <- person1
+#for(i in 2:38){
+#  people <- rbind(people,pictures("CroppedYale/",people_list[i],dir_list_new,n.col=32256))
+#}
+```
+
+Get the mean face of all the people and plot it.
+
+```{r}
+#par(mfrow=c(1,1),mai=c(1,1,1,1))
+#mean_face<- apply(people, 2, mean)
+#plot(pixmapGrey(data=mean_face,nrow=192,ncol=168,cellres=1))
+```
+
+Since there are too many pictures of the people, let's select 3 (or more as you want) sample pictures for each person.
+
+```{r,warning=FALSE}
+
+setwd("/Users/LenaShin/Desktop/Summer2019/SML")
+
+# Create a matrix to contain the sample pictures of the 38 people
+
+people_sample <- sample_pictures("CroppedYale/",people_list[1],dir_list_new,n.col=32256,n.pic=10)
+
+for(i in 2:38){
+  people_sample <- rbind(people_sample,sample_pictures("CroppedYale/",people_list[i],dir_list_new,n.col=32256,n.pic=3))
+}
+
+```
+
+Get the mean face from the random pictures of the 38 people and plot it.
+
+```{r,warning=FALSE}
+par(mfrow=c(1,1),mai=c(1,1,1,1))
+# We need to remove the last column which is the sample index
+mean_face_sample <- apply(people_sample, 2, mean)
+plot(pixmapGrey(data=mean_face_sample,nrow=192,ncol=168,cellres=1))
+```
+
+Now, run PCA on all the pictures of the first person without scaling, and see how many principal components are important.
+
+```{r,warning=FALSE}
+
+person_1_pca <- prcomp(person_1)
+plot(seq(from=1,to=64,by=1),(person_1_pca$sdev)^2/sum((person_1_pca$sdev)^2),type="l",xlab="number of PCs",ylab="ratio of the variance")
+points(seq(from=1,to=64,by=1),(person_1_pca$sdev)^2/sum((person_1_pca$sdev)^2))
+
+```
+
+The first three principal components explain about 90% of the variance in the data set. Now, let's visualize the first five components for comparison.
+
+```{r,warning=FALSE}
+
+par(mfrow=c(1,1), mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=c(person_1_pca$rotation[,1],person_1_pca$rotation[,2],person_1_pca$rotation[,3],person_1_pca$rotation[,4],person_1_pca$rotation[,5]),nrow=192,ncol=168*5,cellres=1))
+
+```
+
+Let's scale it and do the same thing.
+
+```{r,warning=FALSE}
+
+person_1_scaled <- scale(person_1,center=TRUE, scale=FALSE)
+person_1_scaled.pca <- prcomp(person_1_scaled)
+plot(seq(from=1,to=64,by=1),(person_1_scaled.pca$sdev)^2/sum((person_1_scaled.pca$sdev)^2),type="l",xlab="number of PCs",ylab="ratio of the variance")
+points(seq(from=1,to=64,by=1),(person_1_scaled.pca$sdev)^2/sum((person_1_scaled.pca$sdev)^2))
+par(mfrow=c(1,1), mai=c(0.1,0.1,0.1,0.1))
+plot(pixmapGrey(data=c(person_1_scaled.pca$rotation[,1],person_1_scaled.pca$rotation[,2],person_1_scaled.pca$rotation[,3],person_1_scaled.pca$rotation[,4],person_1_scaled.pca$rotation[,5]),nrow=192,ncol=168*5,cellres=1))
+
+```
+
+It seems like scaling in this case didn't make any difference in terms of the variance of each PCs.
+
+Now, let's extract the pictures of three different people and compare the projection on the first two PCs. 
+
+```{r,warning=FALSE}
+setwd("/Users/LenaShin/Desktop/Summer2019/SML")
+three_people <- person_1
+
+n<-vector(mode="numeric",length=3)
+for(i in 2:3){
+  three_people <- rbind(three_people,pictures("CroppedYale/",people_list[i],dir_list_new,n.col=32256))
+  n[i] <- dim(three_people)[1]-sum(n)
+}
+
+three_people_pca <- prcomp(three_people)
+
+plot(seq(from=1,to=64*3,by=1),(three_people_pca$sdev)^2/sum((three_people_pca$sdev)^2),type="l", xlab="number of PCs", ylab="ratio of the variance")
+points(seq(from=1,to=64*3,by=1),(three_people_pca$sdev)^2/sum((three_people_pca$sdev)^2))
+
+```
+
+Let's organize the data by adding a column that indicates which person the row refers to. I'll keep the index of 10 pictures of each person as a test set in case.
+
+```{r,warning=FALSE}
+
+type <- as.matrix(c(rep("1",times=n[1]),rep("2",times=n[2]),rep("3",times=n[3])),nrow=sum(n),ncol=1)
+
+three_people_pca$x <- cbind(three_people_pca$x,type)
+dim(three_people_pca$x)
+colnames(three_people_pca$x) <- c(colnames(three_people_pca$x[,-193]),"type")
+colnames(three_people_pca$x)
+
+```
+
+
+```{r,warning=FALSE}
+plot(pixmapGrey(data=c(three_people_pca$rotation[,1],three_people_pca$rotation[,2],three_people_pca$rotation[,3],three_people_pca$rotation[,4],three_people_pca$rotation[,5]),nrow=192,ncol=168*5,cellres=1))
+```
+
+```{r,warning=FALSE}
+par(mfrow=c(1,1), mai=c(1, 1, 1, 1))
+plot(three_people_pca$x[,1], three_people_pca$x[,2],pch=16, xlab="First Principle Component", ylab="Second Principle Component" )
+```
